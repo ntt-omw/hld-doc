@@ -1,4 +1,3 @@
-# NETCONF Server High Level Design Document
 # Fpmsyncd Next Hop Table Enhancement High Level Design Document
 
 - This repository is open for suggestions for discussion with the SONiC community.
