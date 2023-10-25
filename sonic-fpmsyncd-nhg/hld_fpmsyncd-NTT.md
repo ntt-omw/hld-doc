@@ -7,7 +7,6 @@
 - [Overview](#overview)
 - [Requirements](#requirements)
 - [Architecture Design](#architecture-design)
-  - [Source Code change (TODO: move to proper place)](#source-code-change-todo-move-to-proper-place)
 - [High-Level Design](#high-level-design)
   - [Current fpmsyncd processing flow (for reference)](#current-fpmsyncd-processing-flow-for-reference)
   - [Proposed fpmsyncd processing flow using NextHop Group](#proposed-fpmsyncd-processing-flow-using-nexthop-group)
@@ -16,27 +15,40 @@
   - [Example of entries in ASIC\_DB](#example-of-entries-in-asic_db)
 - [SAI API](#sai-api)
 - [Configuration and management](#configuration-and-management)
-  - [Manifest (if the feature is an Application Extension)](#manifest-if-the-feature-is-an-application-extension)
+  - [Configuration data flow](#configuration-data-flow)
   - [CLI/YANG model Enhancements](#cliyang-model-enhancements)
   - [Config DB Enhancements](#config-db-enhancements)
 - [Warmboot and Fastboot Design Impact](#warmboot-and-fastboot-design-impact)
-- [Restrictions/Limitations](#restrictionslimitations)
 - [Testing Requirements/Design](#testing-requirementsdesign)
   - [Unit Test cases](#unit-test-cases)
+  - [Config test cases (feature enable/disable)](#config-test-cases-feature-enabledisable)
   - [System Test cases](#system-test-cases)
 - [Open/Action items - if any](#openaction-items---if-any)
-  - [Backward compatibility with Fine-grain NHG, Ordered NHG/ECMP](#backward-compatibility-with-fine-grain-nhg-ordered-nhgecmp)
+  - [libnl compatibility with upstream](#libnl-compatibility-with-upstream)
+  - [Further performance improvements](#further-performance-improvements)
+  - [Backward compatibility with current NHG creation logic (Fine-grain NHG, Ordered NHG/ECMP)](#backward-compatibility-with-current-nhg-creation-logic-fine-grain-nhg-ordered-nhgecmp)
+  - [nexthop\_compat\_mode Kernel option](#nexthop_compat_mode-kernel-option)
+  - [Warmboot/Fastboot support](#warmbootfastboot-support)
+  - [No support for setting config enable/disable on runtime](#no-support-for-setting-config-enabledisable-on-runtime)
+  - [Source of APPL\_DB entry related to NHG](#source-of-appl_db-entry-related-to-nhg)
 
 ### Revision  
 
-|  Rev  | Date  |               Author                | Change Description |
-| :---: | :---: | :---------------------------------: | ------------------ |
-|  0.1  |  TBD  | Kanji Nakano, Kentaro Ebisawa (NTT) | Initial version    |
+|  Rev  |     Date     |                       Author                       | Change Description                                                                                                                                                          |
+| :---: | :----------: | :------------------------------------------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|  0.1  | Jul 14, 2023 | Kanji Nakano, Kentaro Ebisawa, Hitoshi Irino (NTT) | Initial version                                                                                                                                                             |
+|  0.2  | Jul 30, 2023 |               Kentaro Ebisawa (NTT)                | Remove description about VRF which is not nessesary for NHG. Add High Level Architecture diagram. Add note related to libnl, Routing WG. Fix typo and improve explanations. |
+|  0.3  | Sep 18, 2023 |               Kentaro Ebisawa (NTT)                | Update based on discussion at Routing WG on Sep 14th (Scope, Warmboot/Fastboot, CONFIG_DB)                                                                                  |
+|  0.4  | Sep 24, 2023 |               Kentaro Ebisawa (NTT)                | Add feature enable/disable design and CLI. Update test plan.                                                                                                                     |
 
 ### Scope  
 
 This document details the design and implementation of the "fpmsyncd extension" related to NextHop Group behavior in SONiC.
-The goal of this "fpmsyncd extension" is to integrate NextHop Group functionality into SONiC by writing NextHop Group entry from `fpmsyncd` to `APPL_DB` for NextHop Group operation in SONiC.
+The goal of this "fpmsyncd extension" is to integrate NextHop Group (NHG) functionality into SONiC by writing NextHop Group entry from `fpmsyncd` to `APPL_DB` for NextHop Group operation in SONiC.
+
+- Scope of this change is to extend `fpmsyncd` to handle `RTM_NEWNEXTHOP` and `RTM_DELNEXTHOP` messages from FPM.
+- There will be no change to SWSS/Orchagent.
+- This change is backward compatible. Upgrade from a SONiC version that does not support this feature does not change the user's expected behavior as this feature is disabled by default.
 
 ### Overview 
 
@@ -44,19 +56,30 @@ SONIC system has support for programming routes using the NextHop Group feature 
 The idea is to have a more efficient system that would involve managing the NextHop Group in use by the route table separately, and simply have the route table specify a reference to which NextHop Group to use.
 Since at scale many routes will use the same NextHop Groups, this requires much smaller occupancy per route, and so more efficient building, transmission and parsing of per-route information. 
 
-The current version of `fpmsyncd` has no support to handle the NextHop Group netlink messages sent by zebra process when it uses the new `dplane_fpm_nl` module.
+The current version of `fpmsyncd` has no support to handle the NextHop Group netlink messages sent by zebra process via `FPM` using the `dplane_fpm_nl` module.
 This implementation modifies the `fpmsyncd` code to handle `RTM_NEWNEXTHOP` and `RTM_DELNEXTHOP` events and write it to the database.
-Also, the `fpmsyncd` was modified to use the NextHop Group ID (`nexthop_group`) when programming the route to the `ROUTE_TABLE`.
+Also, the `fpmsyncd` was modified to use the NextHop Group ID (`nexthop_group`) when programming the route to the `ROUTE_TABLE` if `RTA_NH_ID` was included in the `RTM_NEWROUTE` message from zebra via `FPM`.
 
-These capabilities consist in:
-- `fpmsyncd` is responsible for enabling the SET/DEL setting of `NEXTHOP_GROUP_TABLE` for `APPL_DB` in Redis DB.
+NHG ID and members are managed by `FRR`.
+`fpmsyncd` will use NHG ID provided in FPM message from `FRR(zebra)`.
+Thus, logic of either if updating NHG members or create NHG with new ID during topology change is managed by `FRR`.
+
+Use case example of this feature would be BGP PIC, and recursive routes handling.
+BGP PIC has started in design discussion in the SONiC Routing WG.
+Recursive routes support would be discussed after.
+See [09072023 Routing WG Meeting minutes](https://lists.sonicfoundation.dev/g/sonic-wg-routing/wiki/34786) for further information about BGP PIC discussion.
 
 ### Requirements
 
 `Fpmsyncd extension` requires:
 - `fpmsyncd` to handle `RTM_NEWNEXTHOP` and `RTM_DELNEXTHOP` events from zebra via `dplane_fpm_nl`
-- `fpmsyncd` to SET/DEL routes to `APPL_DB: ROUTE_TABLE`` using `nexthop_group`
+- `fpmsyncd` to SET/DEL routes to `APPL_DB: ROUTE_TABLE` using `nexthop_group`
 - `fpmsyncd` to SET/DEL NextHop Group entry to `APPL_DB: NEXTHOP_GROUP_TABLE`
+
+This feature must be disabled by default.
+- When this feature is disabled, behavior will be the same as before introducing this feature.
+  - i.e. `NEXTHOP_GROUP_TABLE` entry will not be created and `nexthop_group` will not be used in `ROUTE_TABLE` entry in `APPL_DB`.
+- See section [Configuration and management](#configuration-and-management) for details on how this feature is disabled/enabled.
 
 ### Architecture Design 
 <!--
@@ -67,69 +90,25 @@ This section should explain how the new feature/enhancement (module/sub-module) 
 If this feature is a SONiC Application Extension mention which changes (if any) needed in the Application Extension infrastructure to support new feature.
 -->
 
-This design directly modifies `fpmsyncd` to use the new `APPL_DB` tables.
+This design modifies `fpmsyncd` to use the new `APPL_DB` tables.
 
 The current `fpmsyncd` handle just the `RTM_NEWROUTE` and `RTM_DELROUTE` writing all route information for each route prefix to `ROUTE_TABLE` on Redis DB (`redis-server`).
 When zebra process is initialized using the old fpm module, the `RTM_NEWROUTE` is sent with at least destination address, gateway, and interface id attributes.
-For multipath route, the `RTM_NEWROUTE` is sent with a list of gateways and interfaces id.
+For multipath route, the `RTM_NEWROUTE` is sent with a list of gateway and interface id.
 
 This `Fpmsyncd extension` will modify `fpmsyncd` to handle  `RTM_NEWNEXTHOP` and `RTM_DELNEXTHOP` as below.
 
-> TODO: Add diagram with flow described in Overview and Requirements
+<!-- omit in toc -->
+##### Figure: Fpmsyncd NHG High Level Architecture
+![fig: fpmsyncd nhg architecture](diagram/fpmsyncd-nhg-architecture.png)
 
-To implement this, below SONiC subsystems will be changed.
+- FRR configuration
+  - (1) config zebra to use `dplane_fpm_nl` instead of `fpm` module (this is default since 202305 release)
+  - (2) set `fpm use-nexthop-groups` option (this is disabled by default and enabled via `CONFIG_DB`)
+- fpmsyncd enhancement
+  - (3) Handle `RTM_NEWNEXTHOP` fpm message from zebra
+  - (4) and create `NEXTHOP_GROUP_TABLE` entry
 
-- sonic-buildimage
-  - modify `sonic-cfggen` to set `fpm use-nexthop-groups`
-  - patch `src/libnl3` to support `nh_id` (TODO: still required in latest master?)
-  - modify `/zebra/rt_netlink.c` to use `vrf_id` for vrf, not `table_id`
-- fpmsyncd (swss)
-  - add default VRF in `/cfgmgr/vrfmgr.cpp`
-  - add `RTM_NEWNEXTHOP` and `RTM_DELNEXTHOP` support in `/fpmsyncd/fpmlink.cpp`
-  - add NextHop Group support in `/fpmsyncd/routesync.cpp` and `/fpmsyncd/routesync.h`
-- frr
-  - change plugin from `fpm` to `dplane_fpm_nl` in `/dockers/docker-fpm-frr/frr/supervisord/supervisord.conf.j2`
-  - this is already done in the latest master branch with [PR#12852](https://github.com/sonic-net/sonic-buildimage/pull/12852)
-
-#### Source Code change (TODO: move to proper place)
-
-sonic-buildimage.patch
-
-- /src/libnl3/patch/0003-Adding-support-for-RTA_NH_ID-attribute.patch
-  - /dockers/docker-fpm-frr/frr/supervisord/supervisord.conf.j2
-  - patch to `rt_nh_id`, `rtnl_route_set_nh_id` etc.
-  - TODO: check if this is still required in the latest master
-- add change to use next hop groups
-  - change
-    - `+fpm use-next-hop-groups`
-    - `+fpm address 127.0.0.1 port 2620`
-  - /dockers/docker-fpm-frr/frr/common/daemons.common.conf.j2
-  - /src/sonic-bgpcfgd/tests/data/sonic-cfggen/
-    - bgpd.conf.j2/all.conf
-    - common/daemons.common.conf
-    - frr.conf.j2/all.conf
-    - staticd/staticd.conf
-    - zebra/zebra.conf
-  - /src/sonic-config-engine/tests/sample_output/py2/
-    - bgpd_frr.conf
-    - bgpd_frr_backend_asic.conf
-    - bgpd_frr_frontend_asic.conf
-    - frr.conf
-    - staticd_frr.conf
-    - t2-chassis-fe-bgpd.conf
-    - etc.
-- /src/sonic-frr/patch/dplane_fpm_nl-Use-vrf_id-for-vrf-not-tabled_id.patch
-  - /zebra/rt_netlink.c
-
-sonic-swss.patch
-
-- add default VRF
-  - /cfgmgr/vrfmgr.cpp
-- Add `RTM_NEWNEXTHOP` and `RTM_DELNEXTHOP` support
-  - /fpmsyncd/fpmlink.cpp
-- many changes to support NextHop Group
-  - /fpmsyncd/routesync.cpp
-  - /fpmsyncd/routesync.h
 
 ### High-Level Design 
 <!--
@@ -262,17 +241,70 @@ Therefore, even after this enhancement, table entries will be created for `ROUTE
 
 ### SAI API 
 
-No changes are being made in SAI. The end result of what gets programmed via SAI will be the same as current implementation.
+No changes are being made in SAI.
+The end result of what gets programmed via SAI will be the same as current implementation when manually adding `NEXTHOP_GROUP_TABLE` entries to `APPL_DB`.
 
 
 ### Configuration and management 
 
-The output of 'show ip route' and 'show ipv6 route' will remain unchanged - the CLI code will resolve the NextHop Group ID referenced in the `ROUTE_TABLE` to display the next hops for the routes.
+This NextHop Group feature is enabled/disabled by config option of zebra (BGP container): `[no] fpm use-next-hop-groups`
+
+- To disable this feature (default): configure `no fpm use-next-hop-groups`
+- To enable this feature: configure `fpm use-next-hop-groups`
+
+On FRR, one can configure this zebra option via vtysh (zebra CLI) or `zebra.conf` (zebra startup config).
+
+In SONiC, we will use CONFIG_DB data to enable/disable this option to be consistent with other SONiC features.
+We will also use `config_db.json` to preserve config among system reboot.
+
+Users (SONiC admin) are expected to use only SONiC CLI or edit `config_db.json` file to enable/disable this feature, and should not edit `zebra.conf` directly.
 
 
-#### Manifest (if the feature is an Application Extension)
+This configuration is backward compatible. Upgrade from a SONiC version that does not support this feature does not change the user's expected behavior as this flag is set to be disabled by default. (i.e. It's disabled if `FEATURE|nexthop_group` entry does not exist in CONFIG_DB)
 
-<!-- Paste a preliminary manifest in a JSON format. -->
+This setting can NOT be enabled or disabled at runtime.
+System reboot is required after enabling/disabling this feature to make sure route entry using and not using this NHG feature would not co-exisit in the `APPL_DB`.
+
+#### Configuration data flow
+
+Diagram shows how `zebra.conf` is genereated from CONFIG_DB data.
+
+<!-- omit in toc -->
+##### Figure: Configuration data flow
+![fig4](diagram/fig4-config.svg)
+
+- CONFIG_DB entry is created via CLI or data stored in `config_db.json` file
+- `sonic-cfggen` will generate `zebra.conf` based on template file named `zebra.conf.j2`
+- FRR will use `zebra.conf` during startup to apply config stored in the file
+
+This flow is existing framework and not specific to this feature.
+
+Modification made for this feature is in `zebra.conf.j2` to generate config with `[no] fpm use-next-hop-groups` based on `FEATURE|nexthop_group` entry in CONFIG_DB.
+
+As shown in below diff code, the template will generate config following below logic.
+
+- If `FEATURE|nexthop_group` is not present in CONFIG_DB => disabled
+- If `FEATURE|nexthop_group` is present in CONFIG_DB but there is no "state" attribute => disabled
+- If `FEATURE|nexthop_group` is present in CONFIG_DB and "state" attribute is different of "enabled" => disabled
+- If `FEATURE|nexthop_group` is present in CONFIG_DB and "state" attribute is "enabled" => enabled
+
+```
+> zebra.conf.j2
+
+ {% endblock banner %}
+ !
+ {% block fpm %}
++{% if ( ('nexthop_group' in FEATURE) and ('state' in  FEATURE['nexthop_group']) and
++        (FEATURE['nexthop_group']['state'] == 'enabled') ) %}
++fpm use-next-hop-groups
++{% else %}
+ ! Uses the old known FPM behavior of including next hop information in the route (e.g. RTM_NEWROUTE) messages
+ no fpm use-next-hop-groups
++{% endif %}
+ !
+ fpm address 127.0.0.1
+ {% endblock fpm %}
+```
 
 #### CLI/YANG model Enhancements 
 
@@ -282,7 +314,97 @@ This should also explain the CLICK and/or KLISH related configuration/show in de
 https://github.com/sonic-net/sonic-utilities/blob/master/doc/Command-Reference.md needs be updated with the corresponding CLI change.
 -->
 
-No change.
+The output of 'show ip route' and 'show ipv6 route' will remain unchanged - the CLI code will resolve the NextHop Group ID referenced in the `ROUTE_TABLE` to display the next hops for the routes.
+
+To enable/disable this feature, two new CLI (Klish) would be introduced.
+
+- Enable: `feature next-hop-group enable`
+- Disable: `no feature next-hop-group`
+
+CONFIG_DB entry will be created (enable) or removed (disable) by entering above CLI command.
+
+This setting is read at boot time during FRR startup so it requires a reboot once it’s changed and saved to startup configuration.
+So after config is changed by CLI (KLISH via RESTCONF), user must run `sudo config save -y` in order for the configuration to be saved in `config_db.json` and take effect after system restart.
+
+Below is example when using this CLI command to enable/disable the feature.
+
+Enable
+
+```sh
+admin@sonic:~$ sonic-db-cli CONFIG_DB keys "FEATURE|nexthop_group"
+# no output
+
+admin@sonic:~$ sonic-cli
+
+sonic# configure terminal
+
+sonic(config)#
+  end        Exit to EXEC mode
+  exit       Exit from current mode
+  feature    Configure additional feature
+  interface  Select an interface
+  ip         Global IP configuration subcommands
+  mclag      domain
+  no         To delete / disable commands in config mode
+
+sonic(config)# feature
+  next-hop-group  Next-hop Groups feature
+
+sonic(config)# feature next-hop-group
+  enable  Enable Next-hop Groups feature
+
+sonic(config)# feature next-hop-group enable
+
+admin@sonic:~$ sonic-db-cli CONFIG_DB keys "FEATURE|nexthop_group"
+FEATURE|nexthop_group
+```
+
+Disable
+
+```sh
+sonic(config)# no
+  feature  Disable additional feature
+  ip       Global IP configuration subcommands
+  mclag    domain
+
+sonic(config)# no feature
+  next-hop-group  Disable Next-hop Groups feature
+
+sonic(config)# no feature next-hop-group
+
+admin@sonic:~$ sonic-db-cli CONFIG_DB keys "FEATURE|nexthop_group"
+# no output
+```
+
+Implementation:
+
+- New CLI actioner `sonic-cli-feature.py` will be added for this CLI command.
+- The CLI command will be defined in a new cli-xml file: `/CLI/clitree/cli-xml/sonic-feature.xml`
+
+When actioner `sonic-cli-feature.py` is called from the Klish framework, it will call RESTCONF to create / remove the CONFIG_DB entry.
+
+- enable:  `$SONIC_CLI_ROOT/sonic-cli-feature.py configure_sonic_nexthop_groups 1`
+- disable: `$SONIC_CLI_ROOT/sonic-cli-feature.py configure_sonic_nexthop_groups 0`
+- RESTCONF URI called from `sonic-cli-feature.py`: `/restconf/data/sonic-feature:sonic-feature`
+
+The model is not newly introduced but using pre-existing `sonic-feature.yang` model present in the source code at https://github.com/sonic-net/sonicbuildimage/blob/master/src/sonic-yang-models/yang-models/sonic-feature.yang
+
+```
+module: sonic-feature
+   +--rw sonic-feature
+      +--rw FEATURE
+         +--rw FEATURE_LIST* [name]
+         +--rw name string
+         +--rw state? feature-state
+         +--rw auto_restart? feature-state
+         +--rw delayed? stypes:boolean_type
+         +--rw has_global_scope? stypes:boolean_type
+         +--rw has_per_asic_scope? feature-scope-status
+         +--rw high_mem_alert? feature-state
+         +--rw set_owner? feature-owner
+         +--rw check_up_status? stypes:boolean_type
+         +--rw support_syslog_rate_limit? stypes:boolean_type
+```
 
 #### Config DB Enhancements  
 
@@ -290,7 +412,27 @@ No change.
 This sub-section covers the addition/deletion/modification of config DB changes needed for the feature. If there is no change in configuration for HLD feature, it should be explicitly mentioned in this section. This section should also ensure the downward compatibility for the change. 
 -->
 
-No change.
+This feature should be disabled/enabled using the existing CONFIG_DB `FEATURE` Table.
+The key name will be `FEATURE|nexthop_group` with `state` attribute.
+
+Configuration schema in ABNF format:
+
+```
+; FEATURE table
+key = FEATURE|nexthop_group     ; FEATURE configuration table
+state = "enabled" or "disabled" ; Globally enable/disable next-hop group feature,
+                                ; by default this flag is disabled
+```
+
+Sample of CONFIG DB snippet given below:
+
+```
+    "FEATURE": {
+        "nexthop_group": {
+            "has_per_asic_scope": "False",
+            "state": "enabled"
+        },
+```
 
 ### Warmboot and Fastboot Design Impact  
 
@@ -298,15 +440,15 @@ No change.
 Mention whether this feature/enhancement has got any requirements/dependencies/impact w.r.t. warmboot and fastboot. Ensure that existing warmboot/fastboot feature is not affected due to this design and explain the same.
 -->
 
-TBD (if applicable)
+- When the feature is disabled, there should be no impact to Warmboot and Fastboot.
+- When the feature is enabled, there will be no warmboot nor fastboot support.
 
-### Restrictions/Limitations  
+When the feature is enabled, NHG ID will be managed by FRR which will change after FRR related process or BGP container restart.
+We need a way to either let FRR preserve the ID or a way to correlate the NHGs, IDs and it's members before and after the restart.
 
-TBD (if applicable)
+We will continue discussion on how we could support Warmboot/Fastboot for future enhancements.
 
 ### Testing Requirements/Design  
-
-TBD
 
 <!--
 Explain what kind of unit testing, system testing, regression testing, warmboot/fastboot testing, etc.,
@@ -314,13 +456,60 @@ Ensure that the existing warmboot/fastboot requirements are met. For example, if
 Example sub-sections for unit test cases and system test cases are given below. 
 -->
 
+One can use `sonic-db-cli` command to check entries in CONFIG_DB.
+
+```sh
+admin@sonic:/etc/sonic$ sonic-db-cli CONFIG_DB keys "FEATURE|nexthop_group"
+FEATURE|nexthop_group
+
+admin@sonic:~$ sonic-db-cli CONFIG_DB HGETALL "FEATURE|nexthop_group"
+{'has_per_asic_scope': 'False', 'state': 'enabled'}
+```
+
+
 #### Unit Test cases  
 
-TBD
+> TBD: Should we add script to unit test fpmsyncd?
+> e.g. create a script to push RTM_NEWNEXTHOP and RTM_DELNEXTHOP message to fpmsyncd and create stub redis DB to check entries are created as expected.
+
+#### Config test cases (feature enable/disable)
+
+Confirm the feature is disabled by default.
+
+1. Boot SONiC with default config (clean install)
+2. Check there is no `FEATURE|nexthop_group` entry in CONFIG_DB
+3. Log into BGP container. Check `/etc/sonic/frr/zebra.conf` has config `no fpm use-next-hop-groups`
+
+CONFIG_DB entry add/del via Klish CLI
+
+1. From CLI, enter `feature next-hop-group enable`
+2. Confirm `FEATURE|nexthop_group` entry with attr `state=enabled` is created CONFIG_DB
+3. From CLI, enter `no feature next-hop-group`
+4. Confirm `FEATURE|nexthop_group` entry does not exist in CONFIG_DB
+
+`zebra.conf` option based on CONFIG_DB entry (disable)
+
+1. Confirm `FEATURE|nexthop_group` entry does not exist in CONFIG_DB
+2. Reboot system
+3. Confirm `/etc/sonic/frr/zebra.conf` has config `no fpm use-next-hop-groups`
+
+`zebra.conf` option based on CONFIG_DB entry (enable)
+
+1. Confirm `FEATURE|nexthop_group` entry with attr `state=enabled` exist in CONFIG_DB
+2. Reboot system
+3. Confirm `/etc/sonic/frr/zebra.conf` has config `fpm use-next-hop-groups`
 
 #### System Test cases
 
-TBD
+Add route
+
+1. Create static route with 2 or more ECMP routes (which cause zebra to send `RTM_NEWNEXTHOP`)
+2. Confirm `APPL_DB` entries are created as expected
+
+Del route
+
+1. Delete static route created in previous test (which cause zebra to send `RTM_DELNEXTHOP`)
+2. Confirm `APPL_DB` entries are deleted as expected
 
 ### Open/Action items - if any 
 
@@ -328,21 +517,55 @@ TBD
 NOTE: All the sections and sub-sections given above are mandatory in the design document. Users can add additional sections/sub-sections if required.
 -->
 
-#### Backward compatibility with Fine-grain NHG, Ordered NHG/ECMP
+#### libnl compatibility with upstream
 
-Eddy Kevetny (Nvidia) provided feedback about `net.ipv4.nexthop_compat_mode` and backward compatibility issue.
+To add this feature, we have extended `libnl` to support NextHop Group. (i.e. `nh_id`, `RTM_NEWNEXTHOP` etc.)
 
-> From: eddyk=nvidia.com@lists.sonicfoundation.dev on Date: Thu, 29 Jun 2023 14:29:56 +0000
->
-> You might want to set “net.ipv4.nexthop_compat_mode” with 0 to enable the Linux kernel to handle NHG and send to FRR.
-> Then you will need also to set “fpm use-next-hop-groups” in FRR Vtysh. Please check which logic of NHG creation is preferrable: by kernel (supporting it from 5.3) or by FRR/Zebra
->
-> Today the logic of creation of NHGs is located in SWSS (Route/NextHopGroup Orch Agent) and the community defined different types of NHG/ECMP with configuration via Redis – e.g. Fine-grain NHG, Ordered NHG/ECMP. If some apps are using these NHG types (I know for sure that Microsoft uses some of them) then it might be a problematic to have a logic of NHG/ECMP creation (particularly enforcing the specific order of NHG members) out of SWSS. Then you might need to consider the support of backward-compatibility for this feature 
+However, there is a proposal [libnl: PR#332](https://github.com/thom311/libnl/pull/332/) to support NextHop Group in upstream `libnl`.
+We should review this PR (and any other related patches if found) so difference from the upstream code would be minimal.
 
-We already have set `fpm use-next-hop-groups` in FRR.
+#### Further performance improvements
 
-We can disable `net.ipv4.nexthop_compat_mode` (set to 0) if it does not cause backward compatibility issue, e.g. if we want to make `fpmsyncd` to use NextHop Group an optional feature.
+Extention to fpmsyncd described in this HLD will only change how `fpmsyncd` will handle `RTM_NEWNEXTHOP` and `RTM_DELNEXTHOP`.
 
-TODO: study NHG creation logic in SWSS (Route/NextHopGroup Orch Agent) to identify:
-1. if we should make this feature an runtime option.
-2. if this has backward compatibility issue
+Further study is required for more fundamental improvements, e.g. how zebra handles NextHop Groups in scale, communication channel between zebra and fpmsyncd, improvements in FRR like BGP PIC support etc.
+
+Refer to the meeting minutes [SONiC Routing Working Group](https://lists.sonicfoundation.dev/g/sonic-wg-routing/wiki) for discussions related to future improvements.
+For the discussion specific to this HLD, check [07132023 Meeting Minutes](https://lists.sonicfoundation.dev/g/sonic-wg-routing/wiki/34321)
+
+#### Backward compatibility with current NHG creation logic (Fine-grain NHG, Ordered NHG/ECMP)
+
+This feature is disabled by default and thus backward compatible that it would not impact the current NHG creation logic in SWSS/Orchagent.
+
+When enabled, NHG ID and member management will be handled by FRR, and the current NHG creation logic in SWSS/Orchagent will not be used.
+i.e. behavior will be same as the current behavior of manually adding entry to `APPL_DB: NEXTHOP_GROUP_TABLE`.
+
+
+#### nexthop_compat_mode Kernel option
+
+In regards to NextHop Group, Linux Kernel runs in compatibility mode which sends netlink message using both old route format without `RTA_NH_ID` and new format using `RTA_NH_ID`.
+
+There is a `sysctl` option `net.ipv4.nexthop_compat_mode nexthop_compat_mode` which is on by default but provides the ability to turn off compatibility mode allowing systems to only send route update with the new format which could potentially improve performance.
+
+This option is not changed as part this HLD to avoid unexpected impact to the existing behavior.
+
+One should carefully study the impact of this change before chainging this option.
+
+#### Warmboot/Fastboot support
+
+Currently this feature does not work with Warmboot/Fastboot.
+We will continue discussion on how we could support Warmboot/Fastboot for future enhancements.
+
+#### No support for setting config enable/disable on runtime
+
+This feature can NOT be enabled or disabled at runtime.
+Reboot is required after enabling/disabling this feature to make sure route entry using and not using this NHG feature would not co-exisit in the `APPL_DB`.
+
+#### Source of APPL_DB entry related to NHG
+
+Expectation today is there is only one source, FRR or some other routing container, to modify NHG related entries in `APPL_DB`.
+
+If there is any use case to use more than one source, then design of `APPL_DB` schema and related logic need to be studied.
+For example, we might need additional attr/entity to distinguish the source of the NHG/NH entry.
+
+Not that this not specific to NHG feature but typical limitation when more than one entities are modifying same `APPL_DB` entry.
