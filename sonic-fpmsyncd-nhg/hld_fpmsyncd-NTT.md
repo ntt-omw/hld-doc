@@ -202,11 +202,40 @@ After sending the `RTM_NEWNEXTHOP` events, zebra sends the `RTM_NEWROUTE` to `fp
 For example. following route configuration will generate events show in the table below:
 
 ```
+admin@sonic:~$ show ip route
+
 S>* 8.8.8.0/24 [1/0] via 10.0.1.5, Ethernet4, weight 1, 00:01:09 
   * via 10.0.2.6, Ethernet8, weight 1, 00:01:09 
 S>* 9.9.9.0/24 [1/0] via 10.0.1.5, Ethernet4, weight 1, 00:00:04 
   * via 10.0.2.6, Ethernet8, weight 1, 00:00:04
 ```
+
+```
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
+NEXTHOP_GROUP_TABLE:ID116
+NEXTHOP_GROUP_TABLE:ID117
+NEXTHOP_GROUP_TABLE:ID118
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID116
+{'nexthop': '10.0.1.5', 'ifname': 'Ethernet4'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID117
+{'nexthop': '10.0.2.6', 'ifname': 'Ethernet8'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID118
+{'nexthop': '10.0.1.5,10.0.2.6', 'ifname': 'Ethernet4,Ethernet8', 'weight': '1,1'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
+ROUTE_TABLE:8.8.8.0/24
+ROUTE_TABLE:9.9.9.0/24
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:8.8.8.0/24
+{'nexthop_group': 'ID118', 'protocol': '0xc4'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:9.9.9.0/24
+{'nexthop_group': 'ID118', 'protocol': '0xc4'}
+```
+
 <table>
   <tr><td>Seq</td><td>Event</td><td>Attributes</td><td>Value</td></tr>
   <tr><td rowspan="3">1</td><td rowspan="3">RTM_NEWNEXTHOP</td><td>NHA_ID</td><td>116</td></tr>
