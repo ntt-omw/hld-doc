@@ -533,13 +533,101 @@ CONFIG_DB entry add/del via Klish CLI
 
 Add route
 
-1. Create static route with 2 or more ECMP routes (which cause zebra to send `RTM_NEWNEXTHOP`)
+1. Create static route or bgp with 2 or more ECMP routes (which cause zebra to send `RTM_NEWNEXTHOP`)
 2. Confirm `APPL_DB` entries are created as expected
+
+Sample of APPL_DB output result when Add route.
+```
+admin@sonic:~$ ip route
+10.0.0.0/31 dev Ethernet0 proto kernel scope link src 10.0.0.0
+10.0.0.2/31 dev Ethernet4 proto kernel scope link src 10.0.0.2
+10.1.1.2 nhid 120 via 10.0.0.1 dev Ethernet0 proto bgp src 10.1.1.1 metric 20
+10.1.1.3 nhid 123 via 10.0.0.3 dev Ethernet4 proto bgp src 10.1.1.1 metric 20
+10.1.1.4 nhid 127 proto bgp src 10.1.1.1 metric 20
+        nexthop via 10.0.0.1 dev Ethernet0 weight 1
+        nexthop via 10.0.0.3 dev Ethernet4 weight 1
+172.27.254.0/24 dev eth0 proto kernel scope link src 172.27.254.151
+240.127.1.0/24 dev docker0 proto kernel scope link src 240.127.1.1 linkdown
+
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
+NEXTHOP_GROUP_TABLE:ID127
+NEXTHOP_GROUP_TABLE:ID120
+NEXTHOP_GROUP_TABLE:ID123
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID127
+{'nexthop': '10.0.0.1,10.0.0.3', 'ifname': 'Ethernet0,Ethernet4', 'weight': '1,1'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID120
+{'nexthop': '10.0.0.1', 'ifname': 'Ethernet0'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID123
+{'nexthop': '10.0.0.3', 'ifname': 'Ethernet4'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
+ROUTE_TABLE:10.0.0.0/31
+ROUTE_TABLE:10.0.0.2/31
+ROUTE_TABLE:10.1.1.3
+ROUTE_TABLE:10.1.1.2
+ROUTE_TABLE:10.1.1.4
+ROUTE_TABLE:10.1.1.1
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.0.0.0/31
+{'nexthop': '0.0.0.0', 'ifname': 'Ethernet0', 'protocol': 'kernel'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.0.0.2/31
+{'nexthop': '0.0.0.0', 'ifname': 'Ethernet4', 'protocol': 'kernel'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.3
+{'nexthop_group': 'ID123', 'protocol': 'bgp'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.2
+{'nexthop_group': 'ID120', 'protocol': 'bgp'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.4
+{'nexthop_group': 'ID127', 'protocol': 'bgp'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.1
+{'nexthop': '0.0.0.0', 'ifname': 'Loopback0', 'protocol': 'kernel'}
+```
 
 Del route
 
 1. Delete static route created in previous test (which cause zebra to send `RTM_DELNEXTHOP`)
 2. Confirm `APPL_DB` entries are deleted as expected
+
+Sample of APPL_DB output result when Del route.
+```
+admin@sonic:~$ ip route
+10.0.0.2/31 dev Ethernet4 proto kernel scope link src 10.0.0.2
+10.1.1.3 nhid 123 via 10.0.0.3 dev Ethernet4 proto bgp src 10.1.1.1 metric 20
+10.1.1.4 nhid 123 via 10.0.0.3 dev Ethernet4 proto bgp src 10.1.1.1 metric 20
+172.27.254.0/24 dev eth0 proto kernel scope link src 172.27.254.151
+240.127.1.0/24 dev docker0 proto kernel scope link src 240.127.1.1 linkdown
+
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
+NEXTHOP_GROUP_TABLE:ID123
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID123
+{'nexthop': '10.0.0.3', 'ifname': 'Ethernet4'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
+ROUTE_TABLE:10.0.0.2/31
+ROUTE_TABLE:10.1.1.3
+ROUTE_TABLE:10.1.1.4
+ROUTE_TABLE:10.1.1.1
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.0.0.2/31
+{'nexthop': '0.0.0.0', 'ifname': 'Ethernet4', 'protocol': 'kernel'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.3
+{'nexthop_group': 'ID123', 'protocol': 'bgp'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.4
+{'nexthop_group': 'ID123', 'protocol': 'bgp'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.1
+{'nexthop': '0.0.0.0', 'ifname': 'Loopback0', 'protocol': 'kernel'}
+```
 
 ### Open/Action items - if any 
 
