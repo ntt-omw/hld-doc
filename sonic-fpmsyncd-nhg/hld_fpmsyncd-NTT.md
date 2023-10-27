@@ -141,19 +141,16 @@ This section covers the high level design of the feature/enhancement. This secti
 For example, if one configure following routes:
 
 ```
-S>* 8.8.8.0/24 [1/0] via 10.0.1.5, Ethernet4, weight 1, 00:00:05
-* via 10.0.1.6, Ethernet4, weight 1, 00:00:05
-S>* 9.9.9.0/24 [1/0] via 10.0.1.5, Ethernet4, weight 1, 00:00:19
-* via 10.0.1.6, Ethernet4, weight 1, 00:00:19
+B>*10.1.1.4/32 [20/0] via 10.0.0.1, Ethernet0, 00:00:08
+  *                   via 10.0.0.3, Ethernet4, 00:00:08
 ```
 
 it will generate the following `APPL_DB` entries:
 
 ```
-admin@sonic:~$ sonic-db-cli APPL_DB hgetall "ROUTE_TABLE:8.8.8.0/24"
-{'nexthop': '10.0.1.5,10.0.1.6', 'ifname': 'Ethernet4,Ethernet4', 'weight': '1,1'}
-admin@sonic:~$ sonic-db-cli APPL_DB hgetall "ROUTE_TABLE:9.9.9.0/24"
-{'nexthop': '10.0.1.5,10.0.1.6', 'ifname': 'Ethernet4,Ethernet4', 'weight': '1,1'}
+admin@sonic:~$ sonic-db-cli APPL_DB hgetall "ROUTE_TABLE:10.1.1.4/32"
+{'nexthop': '10.0.0.1,10.0.0.3', 'ifname': 'Ethernet0,Ethernet4', 'weight': '1,1'}
+
 ```
 
 The flow below shows how `zebra`, `fpmsyncd` and `redis-server` interacts when using `fpm plugin` without NextHop Group:
@@ -203,53 +200,36 @@ For example. following route configuration will generate events show in the tabl
 
 ```
 admin@sonic:~$ show ip route
-
-S>* 8.8.8.0/24 [1/0] via 10.0.1.5, Ethernet4, weight 1, 00:01:09 
-  * via 10.0.2.6, Ethernet8, weight 1, 00:01:09 
-S>* 9.9.9.0/24 [1/0] via 10.0.1.5, Ethernet4, weight 1, 00:00:04 
-  * via 10.0.2.6, Ethernet8, weight 1, 00:00:04
+B>*10.1.1.4/32 [20/0] via 10.0.0.1, Ethernet0, 00:00:08
+  *                   via 10.0.0.3, Ethernet4, 00:00:08
 ```
 
 ```
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
-NEXTHOP_GROUP_TABLE:ID116
-NEXTHOP_GROUP_TABLE:ID117
-NEXTHOP_GROUP_TABLE:ID118
+NEXTHOP_GROUP_TABLE:ID127
 
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID116
-{'nexthop': '10.0.1.5', 'ifname': 'Ethernet4'}
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID117
-{'nexthop': '10.0.2.6', 'ifname': 'Ethernet8'}
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID118
-{'nexthop': '10.0.1.5,10.0.2.6', 'ifname': 'Ethernet4,Ethernet8', 'weight': '1,1'}
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID127
+{'nexthop': '10.0.0.1,10.0.0.3', 'ifname': 'Ethernet0,Ethernet4', 'weight': '1,1'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
-ROUTE_TABLE:8.8.8.0/24
-ROUTE_TABLE:9.9.9.0/24
+ROUTE_TABLE:10.1.1.4
 
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:8.8.8.0/24
-{'nexthop_group': 'ID118', 'protocol': '0xc4'}
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:9.9.9.0/24
-{'nexthop_group': 'ID118', 'protocol': '0xc4'}
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.4
+{'nexthop_group': 'ID127', 'protocol': 'bgp'}
 ```
 
 <table>
   <tr><td>Seq</td><td>Event</td><td>Attributes</td><td>Value</td></tr>
-  <tr><td rowspan="3">1</td><td rowspan="3">RTM_NEWNEXTHOP</td><td>NHA_ID</td><td>116</td></tr>
-  <tr><td>NHA_GATEWAY</td><td>10.0.1.5</td></tr>
+  <tr><td rowspan="3">1</td><td rowspan="3">RTM_NEWNEXTHOP</td><td>NHA_ID</td><td>ID125</td></tr>
+  <tr><td>NHA_GATEWAY</td><td>10.0.0.1</td></tr>
   <tr><td>NHA_OIF</td><td>22</td></tr>
-  <tr><td rowspan="3">2</td><td rowspan="3">RTM_NEWNEXTHOP</td><td>NHA_ID</td><td>117</td></tr>
-  <tr><td>NHA_GATEWAY</td><td>10.0.2.6</td></tr>
+  <tr><td rowspan="3">2</td><td rowspan="3">RTM_NEWNEXTHOP</td><td>NHA_ID</td><td>ID126</td></tr>
+  <tr><td>NHA_GATEWAY</td><td>10.0.0.3</td></tr>
   <tr><td>NHA_OIF</td><td>23</td></tr>
-  <tr><td rowspan="2">3</td><td rowspan="2">RTM_NEWNEXTHOP</td><td>NHA_ID</td><td>118</td></tr>
-  <tr><td>NHA_GROUP</td><td>[{116,1},{117,1}]</td></tr>
-  <tr><td rowspan="2">4</td><td rowspan="2">RTM_NEWROUTE</td><td>RTA_DST</td><td>8.8.8.0/24</td></tr>
-  <tr><td>RTA_NH_ID</td><td>118</td></tr>
-  <tr><td rowspan="2">5</td><td rowspan="2">RTM_NEWROUTE</td><td>RTA_DST</td><td>9.9.9.0/24</td></tr>
-  <tr><td>RTA_NH_ID</td><td>118</td></tr>
+  <tr><td rowspan="2">3</td><td rowspan="2">RTM_NEWNEXTHOP</td><td>NHA_ID</td><td>ID127</td></tr>
+  <tr><td>NHA_GROUP</td><td>[{125,1},{126,1}]</td></tr>
+  <tr><td rowspan="2">4</td><td rowspan="2">RTM_NEWROUTE</td><td>RTA_DST</td><td>10.1.1.4</td></tr>
+  <tr><td>RTA_NH_ID</td><td>ID127</td></tr>
 </table>
 
 A short description of `fpmsyncd` logic flow:
@@ -567,16 +547,11 @@ Add route
 
 Sample of APPL_DB output result when Add route.
 ```
-admin@sonic:~$ ip route
-10.0.0.0/31 dev Ethernet0 proto kernel scope link src 10.0.0.0
-10.0.0.2/31 dev Ethernet4 proto kernel scope link src 10.0.0.2
-10.1.1.2 nhid 120 via 10.0.0.1 dev Ethernet0 proto bgp src 10.1.1.1 metric 20
-10.1.1.3 nhid 123 via 10.0.0.3 dev Ethernet4 proto bgp src 10.1.1.1 metric 20
-10.1.1.4 nhid 127 proto bgp src 10.1.1.1 metric 20
-        nexthop via 10.0.0.1 dev Ethernet0 weight 1
-        nexthop via 10.0.0.3 dev Ethernet4 weight 1
-172.27.254.0/24 dev eth0 proto kernel scope link src 172.27.254.151
-240.127.1.0/24 dev docker0 proto kernel scope link src 240.127.1.1 linkdown
+admin@sonic:~$ show ip route
+B>*10.1.1.2/32 [20/0] via 10.0.0.1, Ethernet0, 00:00:10
+B>*10.1.1.3/32 [20/0] via 10.0.0.3, Ethernet4, 00:00:08
+B>*10.1.1.4/32 [20/0] via 10.0.0.1, Ethernet0, 00:00:08
+  *                   via 10.0.0.3, Ethernet4, 00:00:08
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
 NEXTHOP_GROUP_TABLE:ID127
@@ -593,18 +568,9 @@ admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID123
 {'nexthop': '10.0.0.3', 'ifname': 'Ethernet4'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
-ROUTE_TABLE:10.0.0.0/31
-ROUTE_TABLE:10.0.0.2/31
 ROUTE_TABLE:10.1.1.3
 ROUTE_TABLE:10.1.1.2
 ROUTE_TABLE:10.1.1.4
-ROUTE_TABLE:10.1.1.1
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.0.0.0/31
-{'nexthop': '0.0.0.0', 'ifname': 'Ethernet0', 'protocol': 'kernel'}
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.0.0.2/31
-{'nexthop': '0.0.0.0', 'ifname': 'Ethernet4', 'protocol': 'kernel'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.3
 {'nexthop_group': 'ID123', 'protocol': 'bgp'}
@@ -614,9 +580,6 @@ admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.2
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.4
 {'nexthop_group': 'ID127', 'protocol': 'bgp'}
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.1
-{'nexthop': '0.0.0.0', 'ifname': 'Loopback0', 'protocol': 'kernel'}
 ```
 
 Del route
@@ -627,11 +590,8 @@ Del route
 Sample of APPL_DB output result when Del route.
 ```
 admin@sonic:~$ ip route
-10.0.0.2/31 dev Ethernet4 proto kernel scope link src 10.0.0.2
 10.1.1.3 nhid 123 via 10.0.0.3 dev Ethernet4 proto bgp src 10.1.1.1 metric 20
 10.1.1.4 nhid 123 via 10.0.0.3 dev Ethernet4 proto bgp src 10.1.1.1 metric 20
-172.27.254.0/24 dev eth0 proto kernel scope link src 172.27.254.151
-240.127.1.0/24 dev docker0 proto kernel scope link src 240.127.1.1 linkdown
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
 NEXTHOP_GROUP_TABLE:ID123
@@ -640,22 +600,14 @@ admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID123
 {'nexthop': '10.0.0.3', 'ifname': 'Ethernet4'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
-ROUTE_TABLE:10.0.0.2/31
 ROUTE_TABLE:10.1.1.3
 ROUTE_TABLE:10.1.1.4
-ROUTE_TABLE:10.1.1.1
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.0.0.2/31
-{'nexthop': '0.0.0.0', 'ifname': 'Ethernet4', 'protocol': 'kernel'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.3
 {'nexthop_group': 'ID123', 'protocol': 'bgp'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.4
 {'nexthop_group': 'ID123', 'protocol': 'bgp'}
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.1
-{'nexthop': '0.0.0.0', 'ifname': 'Loopback0', 'protocol': 'kernel'}
 ```
 
 ### Open/Action items - if any 
