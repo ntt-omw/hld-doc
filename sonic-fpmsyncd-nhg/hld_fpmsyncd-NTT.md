@@ -589,9 +589,9 @@ Del route
 
 Sample of APPL_DB output result when Del route.
 ```
-admin@sonic:~$ ip route
-10.1.1.3 nhid 123 via 10.0.0.3 dev Ethernet4 proto bgp src 10.1.1.1 metric 20
-10.1.1.4 nhid 123 via 10.0.0.3 dev Ethernet4 proto bgp src 10.1.1.1 metric 20
+admin@sonic:~$ show ip route
+B>*10.1.1.3/32 [20/0] via 10.0.0.3, Ethernet4, 00:00:08
+B>*10.1.1.4/32 [20/0] via 10.0.0.3, Ethernet0, 00:00:08
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
 NEXTHOP_GROUP_TABLE:ID123
