@@ -41,6 +41,7 @@
 |  0.3  | Sep 18, 2023 |               Kentaro Ebisawa (NTT)                | Update based on discussion at Routing WG on Sep 14th (Scope, Warmboot/Fastboot, CONFIG_DB)                                                                                  |
 |  0.4  | Sep 24, 2023 |               Kentaro Ebisawa (NTT)                | Add feature enable/disable design and CLI. Update test plan.                                                                                                                     |
 |  0.5  | Oct 28, 2023 |               Kanji Nakano (NTT)                   | Update feature enable/disable design and CLI. Update test plan.                                                                                                                     |
+|  0.6  | Nov 9, 2023 |               Kanji Nakano (NTT)                   | Update Update test plan.                                                                                                                     |
 
 ### Scope  
 
@@ -540,6 +541,8 @@ CONFIG_DB entry add/del via Klish CLI
 
 #### System Test cases
 
+修正する
+
 Add route
 
 1. Create static route or bgp with 2 or more ECMP routes (which cause zebra to send `RTM_NEWNEXTHOP`)
@@ -554,32 +557,24 @@ B>*10.1.1.4/32 [20/0] via 10.0.0.1, Ethernet0, 00:00:08
   *                   via 10.0.0.3, Ethernet4, 00:00:08
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
-NEXTHOP_GROUP_TABLE:ID127
-NEXTHOP_GROUP_TABLE:ID120
-NEXTHOP_GROUP_TABLE:ID123
+NEXTHOP_GROUP_TABLE:ID94
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID127
 {'nexthop': '10.0.0.1,10.0.0.3', 'ifname': 'Ethernet0,Ethernet4', 'weight': '1,1'}
 
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID120
-{'nexthop': '10.0.0.1', 'ifname': 'Ethernet0'}
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID123
-{'nexthop': '10.0.0.3', 'ifname': 'Ethernet4'}
-
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
-ROUTE_TABLE:10.1.1.3
 ROUTE_TABLE:10.1.1.2
+ROUTE_TABLE:10.1.1.3
 ROUTE_TABLE:10.1.1.4
 
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.3
-{'nexthop_group': 'ID123', 'protocol': 'bgp'}
-
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.2
-{'nexthop_group': 'ID120', 'protocol': 'bgp'}
+{'nexthop_group': 'ID94', 'protocol': 'bgp'}
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.3
+{'nexthop': '10.0.0.1', 'ifname': 'Ethernet0', 'protocol': 'bgp'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.4
-{'nexthop_group': 'ID127', 'protocol': 'bgp'}
+{'nexthop': '10.0.0.3', 'ifname': 'Ethernet4', 'protocol': 'bgp'}
 ```
 
 Del route
@@ -594,10 +589,6 @@ B>*10.1.1.3/32 [20/0] via 10.0.0.3, Ethernet4, 00:00:08
 B>*10.1.1.4/32 [20/0] via 10.0.0.3, Ethernet0, 00:00:08
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
-NEXTHOP_GROUP_TABLE:ID123
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID123
-{'nexthop': '10.0.0.3', 'ifname': 'Ethernet4'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
 ROUTE_TABLE:10.1.1.3
