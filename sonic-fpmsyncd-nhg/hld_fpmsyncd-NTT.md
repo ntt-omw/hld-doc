@@ -585,20 +585,20 @@ Del route
 Sample of APPL_DB output result when Del route.
 ```
 admin@sonic:~$ show ip route
-B>*10.1.1.3/32 [20/0] via 10.0.0.3, Ethernet4, 00:00:08
-B>*10.1.1.4/32 [20/0] via 10.0.0.3, Ethernet0, 00:00:08
+B>*10.1.1.2/32 [20/0] via 10.0.0.3, Ethernet4, 00:08:31
+B>*10.1.1.4/32 [20/0] via 10.0.0.3, Ethernet4, 00:09:30
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
-ROUTE_TABLE:10.1.1.3
+ROUTE_TABLE:10.1.1.2
 ROUTE_TABLE:10.1.1.4
 
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.3
-{'nexthop_group': 'ID123', 'protocol': 'bgp'}
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.2
+{'nexthop': '10.0.0.3', 'ifname': 'Ethernet4', 'protocol': 'bgp'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.4
-{'nexthop_group': 'ID123', 'protocol': 'bgp'}
+{'nexthop': '10.0.0.3', 'ifname': 'Ethernet4', 'protocol': 'bgp'}
 ```
 
 ### Open/Action items - if any 
