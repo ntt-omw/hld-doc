@@ -541,8 +541,6 @@ CONFIG_DB entry add/del via Klish CLI
 
 #### System Test cases
 
-修正する
-
 Add route
 
 1. Create static route or bgp with 2 or more ECMP routes (which cause zebra to send `RTM_NEWNEXTHOP`)
