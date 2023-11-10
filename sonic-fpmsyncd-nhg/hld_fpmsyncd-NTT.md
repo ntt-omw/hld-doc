@@ -509,9 +509,6 @@ admin@sonic:/etc/sonic$ redis-cli -n 4 hget "DEVICE_METADATA|localhost" nexthop_
 
 #### Unit Test cases  
 
-> TBD: Should we add script to unit test fpmsyncd?
-> e.g. create a script to push RTM_NEWNEXTHOP and RTM_DELNEXTHOP message to fpmsyncd and create stub redis DB to check entries are created as expected.
-
 #### Config test cases (feature enable/disable)
 
 Confirm the feature is disabled by default.
@@ -570,7 +567,7 @@ admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.2
 
 Del route
 
-1. Delete static route created in previous test (which cause zebra to send `RTM_DELNEXTHOP`)
+1. Delete nexthop(s) except one nexthop.
 2. Confirm `APPL_DB` entries are deleted as expected
 
 Sample of APPL_DB output result when Del route.
@@ -588,11 +585,11 @@ admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.2
 ```
 
 ##### Single NextHops
-For Single NextHops, ensure next hop group is not created.
+For Single NextHop, ensure next hop group is not created.
 
 Add route
 
-1. Create static route or bgp with 1 or more not ECMP routes (which cause zebra to send `RTM_NEWNEXTHOP`)
+1. Create static route or bgp with 1 routes
 2. Confirm `APPL_DB` entries are created as expected
 
 Sample of APPL_DB output result when Add route.
@@ -616,7 +613,7 @@ admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.4
 
 Del route
 
-1. Delete static route created in previous test (which cause zebra to send `RTM_DELNEXTHOP`)
+1. Delete static or bgp route created in previous test
 2. Confirm `APPL_DB` entries are deleted as expected
 
 Sample of APPL_DB output result when Del route.
