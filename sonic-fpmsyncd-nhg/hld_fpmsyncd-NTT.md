@@ -540,6 +540,9 @@ CONFIG_DB entry add/del via Klish CLI
 3. Confirm `/etc/sonic/frr/zebra.conf` has config `fpm use-next-hop-groups`
 
 #### System Test cases
+##### Multiple NextHops
+In case of multiple nexthops, Nexthop group will create it.
+For multiple nexthops, ensure next hop group is created.
 
 Add route
 
@@ -549,24 +552,60 @@ Add route
 Sample of APPL_DB output result when Add route.
 ```
 admin@sonic:~$ show ip route
-B>*10.1.1.2/32 [20/0] via 10.0.0.1, Ethernet0, 00:00:10
-B>*10.1.1.3/32 [20/0] via 10.0.0.3, Ethernet4, 00:00:08
-B>*10.1.1.4/32 [20/0] via 10.0.0.1, Ethernet0, 00:00:08
-  *                   via 10.0.0.3, Ethernet4, 00:00:08
+B>*10.1.1.2/32 [20/0] via 10.0.0.1, Ethernet0, 00:00:14
+  *                   via 10.0.0.3, Ethernet4, 00:00:14
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
 NEXTHOP_GROUP_TABLE:ID94
 
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID127
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL NEXTHOP_GROUP_TABLE:ID94
 {'nexthop': '10.0.0.1,10.0.0.3', 'ifname': 'Ethernet0,Ethernet4', 'weight': '1,1'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
 ROUTE_TABLE:10.1.1.2
-ROUTE_TABLE:10.1.1.3
-ROUTE_TABLE:10.1.1.4
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.2
 {'nexthop_group': 'ID94', 'protocol': 'bgp'}
+```
+
+Del route
+
+1. Delete static route created in previous test (which cause zebra to send `RTM_DELNEXTHOP`)
+2. Confirm `APPL_DB` entries are deleted as expected
+
+Sample of APPL_DB output result when Del route.
+```
+admin@sonic:~$ show ip route
+B>*10.1.1.2/32 [20/0] via 10.0.0.3, Ethernet4, 00:00:14
+
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
+
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
+ROUTE_TABLE:10.1.1.2
+
+admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.2
+{'nexthop': '10.0.0.3', 'ifname': 'Ethernet4', 'protocol': 'bgp'}
+```
+
+##### Single NextHops
+For Single NextHops, ensure next hop group is not created.
+
+Add route
+
+1. Create static route or bgp with 1 or more not ECMP routes (which cause zebra to send `RTM_NEWNEXTHOP`)
+2. Confirm `APPL_DB` entries are created as expected
+
+Sample of APPL_DB output result when Add route.
+```
+admin@sonic:~$ show ip route
+B>*10.1.1.3/32 [20/0] via 10.0.0.1, Ethernet0, 00:00:34
+B>*10.1.1.4/32 [20/0] via 10.0.0.3, Ethernet4, 00:00:34
+
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
+
+admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
+ROUTE_TABLE:10.1.1.3
+ROUTE_TABLE:10.1.1.4
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.3
 {'nexthop': '10.0.0.1', 'ifname': 'Ethernet0', 'protocol': 'bgp'}
@@ -583,17 +622,12 @@ Del route
 Sample of APPL_DB output result when Del route.
 ```
 admin@sonic:~$ show ip route
-B>*10.1.1.2/32 [20/0] via 10.0.0.3, Ethernet4, 00:08:31
 B>*10.1.1.4/32 [20/0] via 10.0.0.3, Ethernet4, 00:09:30
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep NEXT
 
 admin@sonic:~$ sonic-db-cli APPL_DB keys \* | grep ROUTE
-ROUTE_TABLE:10.1.1.2
 ROUTE_TABLE:10.1.1.4
-
-admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.2
-{'nexthop': '10.0.0.3', 'ifname': 'Ethernet4', 'protocol': 'bgp'}
 
 admin@sonic:~$ sonic-db-cli APPL_DB HGETALL ROUTE_TABLE:10.1.1.4
 {'nexthop': '10.0.0.3', 'ifname': 'Ethernet4', 'protocol': 'bgp'}
