@@ -212,7 +212,7 @@ gnmic sub -a <ip:port> --skip-verify --path "/openconfig-platform:components/com
 
 Sample telemetry logs with poll mode on platform/components/component/transceiver/state/supply-voltage/instant node
 ```
-gnmic sub -a <ip:port> --skip-verify --path "/openconfig-platform:components/component[name=transceiver_Ethernet0]/openconfig-platform-transceiver:transceiver/state/supply-voltage/instant" --target OC-YANG --mode "poll" timout 10s --format json
+gnmic sub -a <ip:port> --skip-verify --path "/openconfig-platform:components/component[name=transceiver_Ethernet0]/openconfig-platform-transceiver:transceiver/state/supply-voltage/instant" --target OC-YANG --mode "poll" 
 {
   "timestamp": 1732085028739414967,
   "time": "2024-11-20T15:43:48.739414967+09:00",
